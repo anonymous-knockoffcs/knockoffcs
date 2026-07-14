@@ -15,7 +15,7 @@ high_dim = 500
 
 variables_with_error= np.load("transformed_variables.npy", allow_pickle=True)
 
-# 从文件中读取测量矩阵
+# Read measurement matrix from file
 with open("measurement matrix.pkl", "rb") as f:
     A = pickle.load(f)
 
@@ -35,10 +35,10 @@ class DantzigStatistic(FeatureStatistic):
         antisym="cd",
         group_agg="avg",
         cv_score=False,
-        lambda_=0.1,  # 默认正则化参数
-        rho=1.0,      # 默认 ADMM 惩罚参数
-        max_iter=1000,  # 默认最大迭代次数
-        tol=1e-4,     # 默认收敛容差
+        lambda_=0.1,  # default regularization parameter
+        rho=1.0,      # default ADMM penalty parameter
+        max_iter=1000,  # default maximum number of iterations
+        tol=1e-4,     # default convergence tolerance
         **kwargs,
     ):
         """
@@ -88,18 +88,18 @@ class DantzigStatistic(FeatureStatistic):
             for regular knockoffs and ``(num_groups,)``-dimensional for
             group knockoffs.
         """
-        # 设置默认分组
+        # Set default groups
         p = X.shape[1]
         if groups is None:
             groups = np.arange(1, p + 1, 1)
 
-        # 合并 X 和 Xk 进行联合计算
+        # Combine X and X_k for joint computation
         X_full = np.hstack([X, Xk])
 
-        # 标准化 y（可选，确保数值稳定性）
+        # Standardize y (optional, for numerical stability)
         y = (y - np.mean(y)) / np.std(y)
 
-        # Step 1: 使用 Dantzig Selector 计算 Z 统计量
+        # Step 1: Compute Z statistics using the Dantzig Selector
         beta = dantzig_selector_admm(
             X=X_full,
             y=y,
@@ -109,7 +109,7 @@ class DantzigStatistic(FeatureStatistic):
             tol=tol
         )
 
-        # Step 2: 分割 beta 为 Z（前 p 个为原始特征，后 p 个为敲除特征）
+        # Step 2: Use beta_hat as Z (first p entries are original features, last p entries are knockoff features)
         Z = beta  # beta 已经是 (2p,) 形状
 
         # Step 3: 组合 Z 统计量
