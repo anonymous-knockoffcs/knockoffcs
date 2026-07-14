@@ -15,7 +15,7 @@ high_dim = 500
 
 variables_with_error= np.load("transformed_variables.npy", allow_pickle=True)
 
-# 从文件中读取测量矩阵
+# Read measurement matrix from file
 with open("measurement matrix.pkl", "rb") as f:
     A = pickle.load(f)
 
@@ -34,8 +34,8 @@ class ClimeStatistic(FeatureStatistic):
         antisym="cd",
         group_agg="avg",
         cv_score=False,
-        lambda_=0.1,  # 默认正则化参数
-        tau=1e-3,     # 默认支持集阈值
+        lambda_=0.1,  # Default regularization parameter
+        tau=1e-3,     # Default support set threshold
         **kwargs,
     ):
         """
@@ -81,18 +81,18 @@ class ClimeStatistic(FeatureStatistic):
             for regular knockoffs and ``(num_groups,)``-dimensional for
             group knockoffs.
         """
-        # 设置默认分组
+        # Set default grouping
         p = X.shape[1]
         if groups is None:
             groups = np.arange(1, p + 1, 1)
 
-        # 合并 X 和 Xk 进行联合计算
+        # Combine X and Xk for joint calculation
         X_full = np.hstack([X, Xk])
 
-        # 标准化 y（可选，确保数值稳定性）
+        # Standardize y (optional, ensures numerical stability)
         y = (y - np.mean(y)) / np.std(y)
 
-        # Step 1: 使用 CLIME 风格压缩感知计算 Z 统计量
+        # Step 1: Compute Z statistics using CLIME-style compressed sensing
         beta_hat, _ = clime_compressive_sensing(
             A=X_full,
             y=y,
@@ -100,18 +100,18 @@ class ClimeStatistic(FeatureStatistic):
             tau=tau
         )
 
-        # Step 2: 使用 beta_hat 作为 Z（前 p 个为原始特征，后 p 个为敲除特征）
-        Z = beta_hat  # beta_hat 已经是 (2p,) 形状
+        # Step 2: Use beta_hat as Z (first p entries are original features, last p entries are knockoff features)
+        Z = beta_hat  # beta_hat is already in shape (2p,)
 
-        # Step 3: 组合 Z 统计量
+        # Step 3: Combine Z statistics
         W_group = combine_Z_stats(Z, groups, antisym=antisym, group_agg=group_agg)
 
-        # 保存值以供后续使用
+        # Save values for later use
         self.Z = Z
         self.groups = groups
         self.W = W_group
 
-        # 交叉验证分数（未实现）
+        # Cross-validation scores (not implemented)
         if cv_score:
             self.score = None
             self.score_type = "not_implemented"
@@ -121,41 +121,40 @@ class ClimeStatistic(FeatureStatistic):
 
 def clime_compressive_sensing(A, y, lambda_, tau=1e-3):
     """
-    使用 CLIME 风格优化进行压缩感知支持集恢复
-    参数：
-        A: 测量矩阵 (n x p)
-        y: 观测向量 (n,)
-        lambda_: 正则化参数
-        tau: 支持集阈值
-    返回：
-        beta_hat: 估计的稀疏信号
-        support: 估计的支持集
+    Compressed sensing support set recovery using CLIME-style optimization
+    Parameters:
+        X: measurement matrix (n x p)
+        y: observation vector (n,)
+        lambda_: regularization parameter
+    Returns:
+        beta_hat: estimated sparse signal
+        support: estimated support set
     """
     p = A.shape[1]
 
-    # 定义变量
+    # define variables
     beta = cp.Variable(p)
 
-    # 目标：min ||beta||_1
+    # goal: min ||beta||_1
     objective = cp.Minimize(cp.norm(beta, 1))
 
-    # 约束：||A beta - y||_inf <= lambda
+    # constraint：||A beta - y||_inf <= lambda
     constraints = [cp.max(cp.abs(A @ beta - y)) <= lambda_]
 
-    # 求解
+    # solve
     prob = cp.Problem(objective, constraints)
     prob.solve(solver=cp.CLARABEL, verbose=False)
 
-    # 估计 beta
+    # evaluate beta
     beta_hat = beta.value
 
-    # 支持集恢复：选择 |beta_i| > tau 的索引
+    # support set recovery: Choose index where |beta_i| > tau
     support = np.where(np.abs(beta_hat) > tau)[0]
 
     return beta_hat, support
 
 
-# 生成 knockoff 矩阵（只需生成一次）
+# generate a knockoff matrix
 kfilter = KnockoffFilter(
     fstat=ClimeStatistic(),
     ksampler='gaussian',
@@ -164,12 +163,12 @@ kfilter = KnockoffFilter(
 
 def generate_knockoffs_for_A(A, method="mvr"):
     """
-    给定一个 (m, n) 的测量矩阵 A，生成其 knockoff 版本 A_k。
-    自动处理协方差矩阵估计或采样中的异常。
+    Given an (m, n) measurement matrix A, generate its knockoff version A_k.
+    Automatically handles anomalies in covariance matrix estimation or sampling.
     """
     X = A.copy()
 
-    # Step 1: 安全估计协方差矩阵 Sigma
+    # Step 1: Safely estimate covariance matrix Sigma
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -178,7 +177,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
     except Exception as e:
         print(f"LedoitWolf failed with {type(e).__name__}: {e}")
 
-        # 替换 scipy 的 eigh 实现为 eig
+        # Replace scipy's eigh implementation with eig
         def patched_eig(a, lower=None, check_finite=False):
             w, vr = np.linalg.eig(a)
             return w, vr
@@ -190,7 +189,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
 
     mu = X.mean(axis=0)
 
-    # Step 2: Knockoff sampling，防止内部线性代数出错
+    # Step 2: Knockoff sampling; prevent internal linear algebra errors
     try:
         sampler = GaussianSampler(X=X, mu=mu, Sigma=Sigma, method=method)
         Xk = sampler.sample_knockoffs()
@@ -207,11 +206,11 @@ def run_experiment(y):
     # Apply knockoff filter with FDR control
     fdr_selected, W = kfilter.forward(X=A, y=y, Xk=Ak)
     #print(f"W:{W}")
-    # 计算变量总数和需要选择的变量个数（10%）
+    # Calculate total number of variables and the number to select (10%)
     num_vars = len(W)
     num_to_select = int(np.ceil(knockoff_selection_ratio * num_vars))
 
-    # 获取W分数最高的变量索引，直接用selected表示
+   # Get indices of variables with highest W scores, using 'selected' directly
     selected = np.argsort(W)[-num_to_select:]
     #print(selected)
 
