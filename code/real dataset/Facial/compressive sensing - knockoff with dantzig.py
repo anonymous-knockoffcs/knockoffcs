@@ -110,17 +110,17 @@ class DantzigStatistic(FeatureStatistic):
         )
 
         # Step 2: Use beta_hat as Z (first p entries are original features, last p entries are knockoff features)
-        Z = beta  # beta 已经是 (2p,) 形状
+        Z = beta  # beta is already a (2p,)-dimensional vector
 
-        # Step 3: 组合 Z 统计量
+        # Step 3: Combine Z statistics
         W_group = combine_Z_stats(Z, groups, antisym=antisym, group_agg=group_agg)
 
-        # 保存值以供后续使用
+        # Store intermediate results for later use
         self.Z = Z
         self.groups = groups
         self.W = W_group
 
-        # 交叉验证分数（未实现）
+        # Cross-validation score (not implemented)
         if cv_score:
             self.score = None
             self.score_type = "not_implemented"
@@ -140,32 +140,32 @@ def dantzig_selector_admm(X, y, lambda_, rho=1.0, max_iter=1000, tol=1e-4):
         tol: 收敛容差
     返回：
         beta: 估计的回归系数
-    """
+"""
     n, p = X.shape
     Xt = X.T
     XtX = Xt @ X
     Xty = Xt @ y
 
-    # 初始化
+    # Initialize ADMM variables
     beta = np.zeros(p)
     z = np.zeros(p)
     u = np.zeros(p)
 
-    # ADMM 迭代
+    # ADMM iterations
     for _ in range(max_iter):
-        # 更新 beta：(XtX + rho I) beta = Xty - z + u
+        # Update z by projecting onto the infinity-norm ball
         beta_old = beta.copy()
         A = XtX + rho * np.eye(p)
         b = Xty - z + u
         beta = np.linalg.solve(A, b)
 
-        # 更新 z：投影到 ||z||_inf <= lambda
+        # Update the dual variable
         z = np.clip(Xt @ (y - X @ beta) + u, -lambda_, lambda_)
 
-        # 更新 u
+        # update u
         u = u + Xt @ (y - X @ beta) - z
 
-        # 检查收敛
+        # Check convergence
         if np.linalg.norm(beta - beta_old) < tol:
             break
 
@@ -173,7 +173,7 @@ def dantzig_selector_admm(X, y, lambda_, rho=1.0, max_iter=1000, tol=1e-4):
 
 
 
-# 生成 knockoff 矩阵（只需生成一次）
+# Generate the knockoff matrix (only once)
 kfilter = KnockoffFilter(
     fstat=DantzigStatistic(),
     ksampler='gaussian',
@@ -182,12 +182,14 @@ kfilter = KnockoffFilter(
 
 def generate_knockoffs_for_A(A, method="mvr"):
     """
-    给定一个 (m, n) 的测量矩阵 A，生成其 knockoff 版本 A_k。
-    自动处理协方差矩阵估计或采样中的异常。
+    Generate the knockoff counterpart A_k for a given measurement matrix A.
+
+    Potential failures during covariance estimation and knockoff sampling
+    are handled automatically.
     """
     X = A.copy()
 
-    # Step 1: 安全估计协方差矩阵 Sigma
+    # Step 1: Robustly estimate the covariance matrix Sigma
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -196,7 +198,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
     except Exception as e:
         print(f"LedoitWolf failed with {type(e).__name__}: {e}")
 
-        # 替换 scipy 的 eigh 实现为 eig
+        # Replace scipy.linalg.eigh with numpy.linalg.eig
         def patched_eig(a, lower=None, check_finite=False):
             w, vr = np.linalg.eig(a)
             return w, vr
@@ -208,7 +210,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
 
     mu = X.mean(axis=0)
 
-    # Step 2: Knockoff sampling，防止内部线性代数出错
+    # Step 2: Perform knockoff sampling with robust error handling
     try:
         sampler = GaussianSampler(X=X, mu=mu, Sigma=Sigma, method=method)
         Xk = sampler.sample_knockoffs()
@@ -216,7 +218,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
         raise RuntimeError("Knockoff sampling failed due to linear algebra issue.") from e
     return Xk
 
-# 从文件中读取测量矩阵
+# Load the measurement matrix from file
 Ak = generate_knockoffs_for_A(A)
 
 
@@ -226,11 +228,11 @@ def run_experiment(y):
     # Apply knockoff filter with FDR control
     fdr_selected, W = kfilter.forward(X=A, y=y, Xk=Ak)
     #print(f"W:{W}")
-    # 计算变量总数和需要选择的变量个数（10%）
+    # Determine the total number of variables and the number to select
     num_vars = len(W)
     num_to_select = int(np.ceil(knockoff_selection_ratio * num_vars))
 
-    # 获取W分数最高的变量索引，直接用selected表示
+    # Select variables with the largest W statistics
     selected = np.argsort(W)[-num_to_select:]
     #print(selected)
 
