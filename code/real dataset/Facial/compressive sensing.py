@@ -14,12 +14,12 @@ high_dim = 500
 
 variables_with_error= np.load("transformed_variables.npy", allow_pickle=True)
 
-# 从文件中读取测量矩阵
+# Read measurement matrix from file
 with open("Another measurement matrix.pkl", "rb") as f:
     A = pickle.load(f)
 
 
-# 生成 knockoff 矩阵（只需生成一次）
+# Generate Knockoff matrix
 kfilter = KnockoffFilter(
     fstat='lcd',
     ksampler='gaussian',
@@ -28,12 +28,14 @@ kfilter = KnockoffFilter(
 
 def generate_knockoffs_for_A(A, method="mvr"):
     """
-    给定一个 (m, n) 的测量矩阵 A，生成其 knockoff 版本 A_k。
-    自动处理协方差矩阵估计或采样中的异常。
+    Generate the knockoff counterpart A_k for a given measurement matrix A.
+
+    Potential failures during covariance estimation and knockoff sampling
+    are handled automatically.
     """
     X = A.copy()
 
-    # Step 1: 安全估计协方差矩阵 Sigma
+    # Step 1: Robustly estimate the covariance matrix Sigma
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -42,7 +44,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
     except Exception as e:
         print(f"LedoitWolf failed with {type(e).__name__}: {e}")
 
-        # 替换 scipy 的 eigh 实现为 eig
+        # Replace scipy.linalg.eigh with numpy.linalg.eig
         def patched_eig(a, lower=None, check_finite=False):
             w, vr = np.linalg.eig(a)
             return w, vr
@@ -54,7 +56,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
 
     mu = X.mean(axis=0)
 
-    # Step 2: Knockoff sampling，防止内部线性代数出错
+    # Step 2: Perform knockoff sampling with robust error handling
     try:
         sampler = GaussianSampler(X=X, mu=mu, Sigma=Sigma, method=method)
         Xk = sampler.sample_knockoffs()
@@ -63,7 +65,7 @@ def generate_knockoffs_for_A(A, method="mvr"):
     return Xk
 
 Ak = generate_knockoffs_for_A(A)
-# 从文件中读取测量矩阵
+# Save the generated knockoff measurement matrix
 with open("knockoff of measurement matrix.pkl", "wb") as f:
     pickle.dump(Ak, f)
 
@@ -101,12 +103,10 @@ def run_experiment(y, methods=['lasso', 'omp', 'knockoff']):
         # Compute knockoffs and feature statistics
         # Apply knockoff filter with FDR control
         fdr_selected, W = kfilter.forward(X=A, y=y, Xk=Ak)
-        #print(f"W:{W}")
-        # 计算变量总数和需要选择的变量个数（10%）
         num_vars = len(W)
         num_to_select = int(np.ceil(knockoff_selection_ratio * num_vars))
 
-        # 获取W分数最高的变量索引，直接用selected表示
+        # Select variables with the largest W statistics
         selected = np.argsort(W)[-num_to_select:]
         #print(selected)
 
