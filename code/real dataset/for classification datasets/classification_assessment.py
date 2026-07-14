@@ -125,12 +125,9 @@ total_size = lasso10_signal.shape[0]
 high_dim = lasso10_signal.shape[1]
 knockoff_selection_ratio = 0.01
 
-train_size = 800  # 想要的训练集大小
-# 生成所有索引
+train_size = 800
 all_indices = np.arange(total_size)
-# 打乱索引
 np.random.shuffle(all_indices)
-# 划分训练集和测试集索引
 train_indices = all_indices[:train_size]
 test_indices = all_indices[train_size:]
 
@@ -162,10 +159,10 @@ knockoffCS_mse = assessment(knockoffCS_signal_train, labels_train, knockoffCS_si
 import sys
 from datetime import datetime
 
-original_stdout = sys.stdout  # 备份原标准输出
+original_stdout = sys.stdout 
 
 with open("output - new.txt", "w", encoding="utf-8") as file:
-    sys.stdout = file  # 重定向到文件
+    sys.stdout = file
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(timestamp,'\n')
     #print(lasso10_mse)
@@ -175,6 +172,4 @@ with open("output - new.txt", "w", encoding="utf-8") as file:
     #print(lasso0001_mse)
     print(OMP_mse)
     print(knockoffCS_mse)
-    sys.stdout = original_stdout  # 恢复标准输出
-
-print("这行会在控制台打印")
+    sys.stdout = original_stdout
